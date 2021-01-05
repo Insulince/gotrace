@@ -1,43 +1,58 @@
-FROM buildpack-deps:jessie-scm
+# Setup Go configuration variables. (Despite being ARG instructions, these should not be set at runtime via `docker build --build-arg`, the
+# default values should be used or changed here).
+ARG GO_VERSION=1.15.6
+ARG GOPATH=/go
+ARG GOROOT_BOOTSTRAP=/usr/local/gotemp/go
+ARG GOROOT=/usr/local/go
 
-# gcc for cgo
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Setup PATH.
+ARG PATH=${GOPATH}/bin:${GOROOT_BOOTSTRAP}/bin:${GOROOT}/bin:${PATH}
+
+### BUILD STAGE
+FROM buildpack-deps:jessie-scm as build
+
+# Download dependencies. gcc is for cgo.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
 		g++ \
 		gcc \
 		libc6-dev \
 		make \
-		patch \
-	&& rm -rf /var/lib/apt/lists/*
+		patch
 
-ENV GOLANG_VERSION 1.4.3
-ENV GOLANG_DOWNLOAD_URL https://golang.org/dl/go$GOLANG_VERSION.linux-amd64.tar.gz
-ENV GOLANG_DOWNLOAD_SHA256 ce3140662f45356eb78bc16a88fc7cfb29fb00e18d7c632608245b789b2086d2
+# Create the parent directory of GOROOT_BOOTSTRAP.
+RUN mkdir -p /usr/local/gotemp
 
-ENV GOPATH /go
-ENV PATH $GOPATH/bin:/usr/local/gotemp/go/bin:$PATH
+# Download and install the Go binary to be used for bootstrapping.
+ENV GO_BOOTSTRAP_DOWNLOAD_URL=https://golang.org/dl/go${GO_VERSION}.linux-amd64.tar.gz
+ENV GO_BOOTSTRAP_SHA256=3918e6cc85e7eaaa6f859f1bdbaac772e7a825b0eb423c63d3ae68b21f84b844
+RUN curl -fsSL ${GO_BOOTSTRAP_DOWNLOAD_URL} -o bootstrap.tar.gz \
+	&& echo ${GO_BOOTSTRAP_SHA256} bootstrap.tar.gz | sha256sum -c - \
+	&& tar -C /usr/local/gotemp -xzf bootstrap.tar.gz
 
-ENV GOLANG_TO_BUILD_VERSION 1.6.3
-ENV GOLANG_TO_BUILD_URL https://golang.org/dl/go$GOLANG_TO_BUILD_VERSION.src.tar.gz
-ENV GOLANG_TO_BUILD_SHA256 6326aeed5f86cf18f16d6dc831405614f855e2d416a91fd3fdc334f772345b00
+# Download the Go source code to be patched.
+ENV GO_DOWNLOAD_URL=https://golang.org/dl/go${GO_VERSION}.src.tar.gz
+ENV GO_SHA256=890bba73c5e2b19ffb1180e385ea225059eb008eb91b694875dd86ea48675817
+RUN curl -fsSL ${GO_DOWNLOAD_URL} -o golang.tar.gz \
+	&& echo ${GO_SHA256} golang.tar.gz | sha256sum -c - \
+	&& tar -C /usr/local -xzf golang.tar.gz
 
-ENV GOROOT_BOOTSTRAP /usr/local/gotemp/go
+# Copy the patch file in.
+COPY go${GO_VERSION}-gotrace.patch /runtime/gotrace.patch
 
-ADD . /runtime
+# Patch the Go source code.
+RUN cd ${GOROOT}/src \
+	&& patch -p2 < /runtime/gotrace.patch \
+	&& ./make.bash
 
-RUN curl -fsSL "$GOLANG_DOWNLOAD_URL" -o golang.tar.gz \
-	&& echo "$GOLANG_DOWNLOAD_SHA256  golang.tar.gz" | sha256sum -c - \
-	&& mkdir -p /usr/local/gotemp && tar -C /usr/local/gotemp -xzf golang.tar.gz \
-	&& rm golang.tar.gz \
-	&& mkdir -p "$GOPATH/src" "$GOPATH/bin" && chmod -R 777 "$GOPATH" \
-	&& curl -fsSL "$GOLANG_TO_BUILD_URL" -o golang.tar.gz \
-	&& echo "$GOLANG_TO_BUILD_SHA256  golang.tar.gz" | sha256sum -c - \
-	&& tar -C /usr/local -xzf golang.tar.gz \
-	&& rm golang.tar.gz \
-	&& cd /usr/local/go/src \
-	&& patch -p2 < /runtime/go"$GOLANG_TO_BUILD_VERSION"-tracenew.patch \
-	&& ./make.bash \
-	&& rm -rf /usr/local/gotemp/
+### RELEASE STAGE
+FROM alpine:latest
 
-ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
+# Setup GOPATH requisite folders.
+RUN mkdir -p ${GOPATH}/src ${GOPATH}/bin \
+	&& chmod -R 777 ${GOPATH}
 
-WORKDIR $GOPATH
+# Copy in patched Go from build stage.
+COPY --from=build ${GOROOT} ${GOROOT}
+
+WORKDIR ${GOPATH}
