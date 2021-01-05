@@ -1,6 +1,6 @@
 diff -Nru go1156/src/internal/trace/parser.go go1156-gotrace/src/internal/trace/parser.go
---- go1156/src/internal/trace/parser.go 2021-01-01 16:21:42.000000000 -0600
-+++ go1156-gotrace/src/internal/trace/parser.go 2021-01-01 16:21:42.000000000 -0600
+--- go1156/src/internal/trace/parser.go	2021-01-01 16:21:42.000000000 -0600
++++ go1156-gotrace/src/internal/trace/parser.go	2021-01-01 16:21:42.000000000 -0600
 @@ -1058,7 +1058,9 @@
  	EvUserTaskEnd       = 46 // end of task [timestamp, internal task id, stack]
  	EvUserRegion        = 47 // trace.WithRegion [timestamp, internal task id, mode(0:start, 1:end), stack, name string]
@@ -20,8 +20,8 @@ diff -Nru go1156/src/internal/trace/parser.go go1156-gotrace/src/internal/trace/
 +	EvGoRecv:            {"GoRecv", 1011, false, []string{"eid", "cid", "val"}, nil},
  }
 diff -Nru go1156/src/runtime/chan.go go1156-gotrace/src/runtime/chan.go
---- go1156/src/runtime/chan.go 2021-01-01 16:21:42.000000000 -0600
-+++ go1156-gotrace/src/runtime/chan.go 2021-01-01 16:21:42.000000000 -0600
+--- go1156/src/runtime/chan.go	2021-01-01 16:21:42.000000000 -0600
++++ go1156-gotrace/src/runtime/chan.go	2021-01-01 16:21:42.000000000 -0600
 @@ -30,6 +30,7 @@
  )
 
@@ -31,7 +31,7 @@ diff -Nru go1156/src/runtime/chan.go go1156-gotrace/src/runtime/chan.go
  	dataqsiz uint           // size of the circular queue
  	buf      unsafe.Pointer // points to an array of dataqsiz elements
 @@ -55,6 +56,12 @@
- 	last *sudog
+ 	last  *sudog
  }
 
 +// global evil counters for channel and send/recv event IDs
@@ -60,12 +60,12 @@ diff -Nru go1156/src/runtime/chan.go go1156-gotrace/src/runtime/chan.go
 +
  		// Found a waiting receiver. We pass the value we want to send
  		// directly to the receiver, bypassing the channel buffer (if any).
- 		send(c, sg, ep, func() { unlock(&c.lock) })
+ 		send(c, sg, ep, func() { unlock(&c.lock) }, 3)
 @@ -218,7 +229,11 @@
  			raceacquire(qp)
  			racerelease(qp)
  		}
--		typedmemove(c.elemtype, qp, ep)
+-		typedmemmove(c.elemtype, qp, ep)
 +
 +		evID = atomic.Xadd64(&evID, 1)
 +		traceGoSend(evID, c.id, elem2int(ep))
@@ -131,17 +131,17 @@ diff -Nru go1156/src/runtime/chan.go go1156-gotrace/src/runtime/chan.go
 +
 +func elem2int(elem unsafe.Pointer) uint64 {
 +	if elem == nil {
-+		return 0
++			return 0
 +	}
 +	return uint64(*((*int)(elem)))
 +}
 diff -Nru go1156/src/runtime/runtime2.go go1156-gotrace/src/runtime/runtime2.go
---- go1156/src/runtime/runtime2.go 2021-01-01 16:21:42.000000000 -0600
-+++ go1156-gotrace/src/runtime/runtime2.go 2021-01-01 16:21:42.000000000 -0600
+--- go1156/src/runtime/runtime2.go	2021-01-01 16:21:42.000000000 -0600
++++ go1156-gotrace/src/runtime/runtime2.go	2021-01-01 16:21:42.000000000 -0600
 @@ -370,6 +370,10 @@
-	waitlink *sudog // g.waiting list or semaRoot
-	waittail *sudog // semaRoot
-	c        *hchan // channel
+ 	waitlink *sudog // g.waiting list or semaRoot
+ 	waittail *sudog // semaRoot
+ 	c        *hchan // channel
 +
 +	eventid uint64 // used for correlating send/recv
 +	value   string // used for representing value to tracer
@@ -150,8 +150,8 @@ diff -Nru go1156/src/runtime/runtime2.go go1156-gotrace/src/runtime/runtime2.go
 
  type libcall struct {
 diff -Nru go1156/src/runtime/select.go go1156-gotrace/src/runtime/select.go
---- go1156/src/runtime/select.go 2021-01-01 16:21:42.000000000 -0600
-+++ go1156-gotrace/src/runtime/select.go 2021-01-01 16:21:42.000000000 -0600
+--- go1156/src/runtime/select.go	2021-01-01 16:21:42.000000000 -0600
++++ go1156-gotrace/src/runtime/select.go	2021-01-01 16:21:42.000000000 -0600
 @@ -324,6 +324,7 @@
  			c.recvq.enqueue(sg)
 
@@ -171,16 +171,16 @@ diff -Nru go1156/src/runtime/select.go go1156-gotrace/src/runtime/select.go
  		}
  		sgnext = sglist.waitlink
 diff -Nru go1156/src/runtime/trace.go go1156-gotrace/src/runtime/trace.go
---- go1156/src/runtime/trace.go 2021-01-01 16:21:42.000000000 -0600
-+++ go1156-gotrace/src/runtime/trace.go 2021-01-01 16:21:42.000000000 -0600
+--- go1156/src/runtime/trace.go	2021-01-01 16:21:42.000000000 -0600
++++ go1156-gotrace/src/runtime/trace.go	2021-01-01 16:21:42.000000000 -0600
 @@ -68,7 +68,10 @@
- 	traceEv = 46 // end of a task [timestamp, internal task id, stack]
- 	traceEv = 47 // trace.WithRegion [timestamp, internal task id, mode(0:start, 1:end), stack, name string]
- 	traceEv = 48 // trace.Log [timestamp, internal task id, key string id, stack, value string]
--	traceEv = 49
-+	traceEv = 49 // goroutine on chan send [timestamp, stack]
-+	traceEv = 50 // goroutine on chan recv [timestamp, stack]
-+	traceEv = 51
+ 	traceEvUserTaskEnd       = 46 // end of a task [timestamp, internal task id, stack]
+ 	traceEvUserRegion        = 47 // trace.WithRegion [timestamp, internal task id, mode(0:start, 1:end), stack, name string]
+ 	traceEvUserLog           = 48 // trace.Log [timestamp, internal task id, key string id, stack, value string]
+-	traceEvCount             = 49
++	traceEvGoSend            = 49 // goroutine on chan send [timestamp, stack]
++	traceEvGoRecv            = 50 // goroutine on chan recv [timestamp, stack]
++	traceEvCount             = 51
 +
  	// Byte is used but only 6 bits are available for event type.
  	// The remaining 2 bits are used to specify the number of arguments.
