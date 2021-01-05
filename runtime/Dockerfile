@@ -11,7 +11,7 @@ ARG GOPATH
 ARG GOROOT
 
 # Setup Go configuration variables.
-ENV GO_VERION=1.15.6
+ENV GO_VERSION=1.15.6
 ENV BOOTSTRAP=/usr/local/gotemp
 ENV GOROOT_BOOTSTRAP=${BOOTSTRAP}/go
 
