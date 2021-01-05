@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/divan/gotrace/trace"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"runtime"
+
+	"github.com/divan/gotrace/trace"
 )
 
 // EventSource defines anything that can
@@ -51,14 +53,12 @@ func (t *TraceSource) Events() ([]*trace.Event, error) {
 }
 
 func parseTrace(r io.Reader, binary string) ([]*trace.Event, error) {
-	events, err := trace.Parse(r)
+	results, err := trace.Parse(r, binary)
 	if err != nil {
 		return nil, err
 	}
 
-	err = trace.Symbolize(events, binary)
-
-	return events, err
+	return results.Events, err
 }
 
 // NativeRun implements EventSource for running app locally,
@@ -79,8 +79,7 @@ func NewNativeRun(path string) *NativeRun {
 // installation and returns parsed events.
 func (r *NativeRun) Events() ([]*trace.Event, error) {
 	// rewrite AST
-	err := r.RewriteSource()
-	if err != nil {
+	if err := r.RewriteSource(); err != nil {
 		return nil, fmt.Errorf("couldn't rewrite source code: %v", err)
 	}
 	defer func(tmpDir string) {
@@ -89,11 +88,21 @@ func (r *NativeRun) Events() ([]*trace.Event, error) {
 		}
 	}(r.Path)
 
-	tmpBinary, err := ioutil.TempFile("", "gotracer_build")
+	pattern := "gotracer_build-*"
+	if runtime.GOOS == "windows" {
+		// Make an executable for Windows platforms so the binary can be run.
+		pattern += ".exe"
+	}
+	tmpBinary, err := ioutil.TempFile("", pattern)
 	if err != nil {
 		return nil, err
 	}
-	defer os.Remove(tmpBinary.Name())
+	defer func() {
+		if err := os.Remove(tmpBinary.Name()); err != nil {
+			fmt.Println("Cannot remove temp file:", err)
+		}
+	}()
+	_ = tmpBinary.Close() // We don't need this file open, just created. External commands will write to it and are rejected on (at least) Windows if its still open.
 
 	// build binary
 	// TODO: replace build&run part with "go run" when there is no more need
@@ -102,6 +111,9 @@ func (r *NativeRun) Events() ([]*trace.Event, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Dir = r.Path
+	env := os.Environ()
+	env = append(env, "GO111MODULE=auto") // Must disable module mode to run a standalone binary like this
+	cmd.Env = env
 	err = cmd.Run()
 	if err != nil {
 		fmt.Println("go build error", stderr.String())
@@ -113,6 +125,7 @@ func (r *NativeRun) Events() ([]*trace.Event, error) {
 	// run
 	stderr.Reset()
 	cmd = exec.Command(tmpBinary.Name())
+	cmd.Env = env
 	cmd.Stderr = &stderr
 	if err = cmd.Run(); err != nil {
 		fmt.Println("modified program failed:", err, stderr.String())

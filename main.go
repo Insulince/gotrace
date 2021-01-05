@@ -49,7 +49,7 @@ func main() {
 
 // ProcessCommands processes command list.
 func ProcessCommands(out string, cmds Commands) {
-	params := GuessParams(cmds)
+	params := GuessParams(&cmds)
 
 	data := cmds.toJSON()
 	if out != "" {

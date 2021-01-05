@@ -29,23 +29,23 @@ GoThree.Trace = function() {
 		"go_cap":  "#615469"
 	};
 	var _colors2 = {
-        "send_arrow":  "#01B0F0",
-        "send_value":  "#01B0F0",
-        "go_normal":  "#AEEE00",
-        "go_link":  "#AEEE00",
-        "go_blocked":  "#FF358B",
-        "go_sleep":  "#FF358B",
-        "go_cap":  "#424242",
-    };
-	var _colors3 = {
-        "send_arrow":  "#00D6DD",
-        "send_value":  "#00D6DD",
-        "go_normal":  "#D4FF00",
-        "go_link":  "#B1B4B5",
-        "go_blocked":  "#ED0000",
-        "go_sleep":  "#6C8200",
-        "go_cap":  "#D4FF00",
-    };
+        "send_arrow": "#01B0F0",
+        "send_value": "#01B0F0",
+        "go_normal": "#AEEE00",
+        "go_link": "#AEEE00",
+        "go_blocked": "#FF358B",
+        "go_sleep": "#FF358B",
+        "go_cap": "#424242",
+    };
+    var _colors3 = {
+        "send_arrow": "#00D6DD",
+        "send_value": "#00D6DD",
+        "go_normal": "#D4FF00",
+        "go_link": "#B1B4B5",
+        "go_blocked": "#ED0000",
+        "go_sleep": "#6C8200",
+        "go_cap": "#D4FF00",
+    };
 
 	var _colors = _colors3;
 
@@ -74,6 +74,7 @@ GoThree.Trace = function() {
 	var _run_time = 0;
 	var _tick_per_sec = 0;
 	var _speed = 1; // 1/x time multiplier
+    var _paused = false;
 	var _speedup_factor = 1.5;
 
 	// _step represents current step in iterating data. 0 <= x < data.length
@@ -188,16 +189,18 @@ GoThree.Trace = function() {
 			if (cmd === undefined) break;
 		}
 
-		// increase time
-		_t += 1/_speed;
+		if (!_paused) {
+            // increase time
+            _t += 1 / _speed;
 
-		// grow existing goroutines along the time axis
-		for (var i = 0; i < _goroutines.length; i++) {
-			var geom = _goroutines[i].line.geometry;
-			var end = geom.vertices[1];
-			end.y -= _scale*(1/_speed);
-			geom.verticesNeedUpdate = true;
-		};
+            // grow existing goroutines along the time axis
+            for (var i = 0; i < _goroutines.length; i++) {
+                var geom = _goroutines[i].line.geometry;
+                var end = geom.vertices[1];
+                end.y -= _scale * (1 / _speed);
+                geom.verticesNeedUpdate = true;
+            };
+        }
 	};
 
 	// 'create goroutine' command handler
@@ -366,6 +369,11 @@ GoThree.Trace = function() {
 	this.speedup = function() {
 		_speed = _speed / _speedup_factor; 
 	};
+
+	// togglePause pauses or unpauses animation.
+	this.togglePause = function() {
+	    _paused = !_paused;
+    }
 
 	this._getDepth = function(parent) {
 		var depth = 0;

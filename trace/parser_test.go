@@ -22,8 +22,8 @@ func TestCorruptedInputs(t *testing.T) {
 		"go 1.5 trace\x00\x00\x00\x00\xc3\x0200",
 	}
 	for _, data := range tests {
-		events, err := Parse(strings.NewReader(data))
-		if err == nil || events != nil {
+		_, err := Parse(strings.NewReader(data), "")
+		if err == nil {
 			t.Fatalf("no error on input: %q\n", data)
 		}
 	}

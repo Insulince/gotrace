@@ -116,6 +116,9 @@ function keydown(event) {
 		case 70: // 'F' - Faster
 			trace.speedup();
 			break;
+		case 71: // 'G' - Pause
+			trace.pause();
+			break;
 		case 187: // '+' - IncWidth
 			trace.incWidth();
 			break;

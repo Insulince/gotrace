@@ -1,4 +1,5 @@
-//go:generate go-bindata-assetfs page/...
+//go:generate go-bindata-assetfs page/... -o ./bindata_assetfs.go
+
 package main
 
 import (

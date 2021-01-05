@@ -1,5 +1,7 @@
+.idea/
 gotrace
 sample.bin
 sample.trace
 examples/sample/
 .*.swp
+vendor/
